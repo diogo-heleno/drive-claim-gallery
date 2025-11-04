@@ -39,26 +39,8 @@ export default function App() {
   const [importText, setImportText] = useState("");
   const [importing, setImporting] = useState(false);
 
-  // Lightbox + zoom/pan
+  // Lightbox simples (sem zoom)
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
-  const [scale, setScale] = useState(1);
-  const [tx, setTx] = useState(0);
-  const [ty, setTy] = useState(0);
-  const imgRef = useRef<HTMLImageElement | null>(null);
-  const [imgW, setImgW] = useState(0);
-  const [imgH, setImgH] = useState(0);
-
-  // Gestos/pointers
-  const draggingRef = useRef(false);
-  const lastPosRef = useRef<{x:number;y:number}>({x:0,y:0});
-
-  // Pointer Events para pinch
-  const pointersRef = useRef<Map<number, {x:number, y:number}>>(new Map());
-  const pinchStartScaleRef = useRef(1);
-  const pinchStartTxRef = useRef(0);
-  const pinchStartTyRef = useRef(0);
-  const pinchStartCenterRef = useRef<{x:number;y:number}>({x:0,y:0});
-  const pinchStartDistRef = useRef<number | null>(null);
 
   // Bloquear scroll do fundo quando o lightbox está aberto
   useEffect(() => {
@@ -127,139 +109,12 @@ export default function App() {
     setShowImport(false);
   }
 
-  // ------- Lightbox helpers -------
-  function openLightbox(idx: number) {
-    setLightboxIndex(idx);
-    setScale(1); setTx(0); setTy(0);
-  }
   function closeLightbox() {
     setLightboxIndex(null);
-    setScale(1); setTx(0); setTy(0);
-    draggingRef.current = false;
-    pointersRef.current.clear();
-    pinchStartDistRef.current = null;
   }
-  function resetView() { setScale(1); setTx(0); setTy(0); }
-
-  // Clamping do pan para não “perder” a imagem
-  function clampPan(nx: number, ny: number, s: number) {
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const w = imgW * s;
-    const h = imgH * s;
-    const overX = Math.max(0, (w - vw) / 2);
-    const overY = Math.max(0, (h - vh) / 2);
-    return {
-      x: Math.max(-overX, Math.min(overX, nx)),
-      y: Math.max(-overY, Math.min(overY, ny)),
-    };
-  }
-
-  // Re-clamp quando muda o scale ou no resize
-  useEffect(() => {
-    const { x, y } = clampPan(tx, ty, scale);
-    if (x !== tx) setTx(x);
-    if (y !== ty) setTy(y);
-    function onResize() {
-      const r = clampPan(tx, ty, scale);
-      setTx(r.x); setTy(r.y);
-    }
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [scale]); // eslint-disable-line
-
-  // Desktop: roda para zoom
-  function onWheel(e: React.WheelEvent) {
-    e.preventDefault();
-    const factor = e.deltaY < 0 ? 1.1 : 0.9;
-    setScale(s => Math.min(6, Math.max(1, s * factor)));
-  }
-
-  // ---------- Pointer Events (rato + toque) ----------
-  function getCenterAndDist() {
-    const pts = Array.from(pointersRef.current.values());
-    if (pts.length < 2) return { center: null as null | {x:number;y:number}, dist: 0 };
-    const [a, b] = pts;
-    const center = { x: (a.x + b.x)/2, y: (a.y + b.y)/2 };
-    const dx = a.x - b.x, dy = a.y - b.y;
-    return { center, dist: Math.hypot(dx, dy) };
-  }
-
-  function onPointerDown(e: React.PointerEvent) {
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-    if (pointersRef.current.size === 2) {
-      const { center } = getCenterAndDist();
-      pinchStartScaleRef.current = scale;
-      pinchStartTxRef.current = tx;
-      pinchStartTyRef.current = ty;
-      pinchStartCenterRef.current = center || { x: e.clientX, y: e.clientY };
-      pinchStartDistRef.current = null; // define na primeira move
-    } else if (pointersRef.current.size === 1) {
-      lastPosRef.current = { x: e.clientX, y: e.clientY };
-      draggingRef.current = true;
-    }
-  }
-
-  function onPointerMove(e: React.PointerEvent) {
-    if (!pointersRef.current.has(e.pointerId)) return;
-    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-    const pts = Array.from(pointersRef.current.values());
-    if (pts.length >= 2) {
-      e.preventDefault();
-      const { center, dist } = getCenterAndDist();
-      if (!center || dist === 0) return;
-
-      // inicializar distância “0” na primeira move
-      if (pinchStartDistRef.current == null) {
-        pinchStartDistRef.current = dist;
-        return;
-      }
-
-      let nextScale = pinchStartScaleRef.current * (dist / (pinchStartDistRef.current || dist));
-      nextScale = Math.min(6, Math.max(1, nextScale));
-
-      // manter o centro do gesto estável
-      const dx = center.x - pinchStartCenterRef.current.x;
-      const dy = center.y - pinchStartCenterRef.current.y;
-      const k = nextScale / pinchStartScaleRef.current;
-
-      const nextTx = pinchStartTxRef.current * k + dx;
-      const nextTy = pinchStartTyRef.current * k + dy;
-      const clamped = clampPan(nextTx, nextTy, nextScale);
-
-      setScale(nextScale);
-      setTx(clamped.x);
-      setTy(clamped.y);
-    } else if (draggingRef.current && scale > 1) {
-      e.preventDefault();
-      const dx = e.clientX - lastPosRef.current.x;
-      const dy = e.clientY - lastPosRef.current.y;
-      lastPosRef.current = { x: e.clientX, y: e.clientY };
-      const r = clampPan(tx + dx, ty + dy, scale);
-      setTx(r.x); setTy(r.y);
-    }
-  }
-
-  function onPointerUp(e: React.PointerEvent) {
-    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    pointersRef.current.delete(e.pointerId);
-    if (pointersRef.current.size < 2) {
-      pinchStartDistRef.current = null;
-    }
-    if (pointersRef.current.size === 0) {
-      draggingRef.current = false;
-    }
-  }
-  // ---------- fim Pointer Events ----------
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Escape") closeLightbox();
-    if (e.key === "+" || e.key === "=") setScale(s => Math.min(6, s * 1.1));
-    if (e.key === "-" || e.key === "_") setScale(s => Math.max(1, s * 0.9));
-    if (e.key === "0") { setScale(1); setTx(0); setTy(0); }
     if (e.key === "ArrowRight" && lightboxIndex !== null) setLightboxIndex(i => (i! + 1) % filtered.length);
     if (e.key === "ArrowLeft" && lightboxIndex !== null) setLightboxIndex(i => (i! - 1 + filtered.length) % filtered.length);
   }
@@ -372,66 +227,56 @@ export default function App() {
         )}
       </main>
 
-      {/* LIGHTBOX */}
+      {/* LIGHTBOX (sem zoom, altura do ecrã) */}
       {currentItem && (
         <div
           className="fixed inset-0 z-50 bg-black/90 text-white overscroll-contain"
           onKeyDown={onKeyDown}
           tabIndex={0}
         >
-          <div className="absolute inset-0">
-            <div
-              className="w-full h-full cursor-grab active:cursor-grabbing overflow-hidden"
-              style={{ touchAction: "none" }}  // essencial para pinch funcionar
-              onWheel={onWheel}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onDoubleClick={resetView}
-            >
-              <img
-                ref={imgRef}
-                src={currentItem.image_url}
-                alt={currentItem.title || "Imagem"}
-                draggable={false}
-                className="pointer-events-none select-none absolute top-1/2 left-1/2 max-w-none"
-                style={{
-                  transform: `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px)) scale(${scale})`,
-                  transition: (draggingRef.current || pointersRef.current.size > 0) ? "none" : "transform 80ms ease-out"
-                }}
-                onLoad={(e) => {
-                  const el = e.currentTarget as HTMLImageElement;
-                  setImgW(el.naturalWidth || el.width);
-                  setImgH(el.naturalHeight || el.height);
-                  const r = clampPan(0, 0, 1);
-                  setTx(r.x); setTy(r.y);
-                }}
-                onError={e => {
-                  const el = e.currentTarget as HTMLImageElement;
-                  const m = currentItem.image_url.match(/id=([^&]+)/);
-                  if (m && m[1]) el.src = `https://lh3.googleusercontent.com/d/${m[1]}=w2400`;
-                }}
-              />
-            </div>
+          <button
+            onClick={closeLightbox}
+            className="absolute top-3 right-3 z-10 px-3 py-2 rounded bg-white text-black text-sm"
+            aria-label="Fechar"
+          >
+            Fechar
+          </button>
+
+          {/* zona clicável para fechar */}
+          <div className="absolute inset-0" onClick={closeLightbox} />
+
+          <div className="absolute inset-0 flex items-center justify-center p-0">
+            <img
+              src={currentItem.image_url}
+              alt={currentItem.title || "Imagem"}
+              draggable={false}
+              className="max-h-screen w-auto max-w-[100vw] object-contain select-none pointer-events-none"
+              onError={e => {
+                const el = e.currentTarget as HTMLImageElement;
+                const m = currentItem.image_url.match(/id=([^&]+)/);
+                if (m && m[1]) el.src = `https://lh3.googleusercontent.com/d/${m[1]}=w2000`;
+              }}
+            />
           </div>
 
-          <div className="absolute top-3 left-3 right-3 flex items-center gap-2">
+          {/* legenda/top bar */}
+          <div className="absolute top-3 left-3 right-20 flex items-center gap-2">
             <div className="px-3 py-1 rounded bg-white/10 text-xs">
               {currentItem.title || "Sem título"} {currentItem.owner ? `• ${currentItem.owner}` : ""}
             </div>
-            <div className="ml-auto flex items-center gap-2">
-              <button onClick={resetView} className="px-3 py-2 rounded bg-white/15 hover:bg-white/25 text-sm">Reset</button>
-              <button onClick={closeLightbox} className="px-3 py-2 rounded bg-white hover:bg-white/90 text-black text-sm">Fechar (Esc)</button>
+            <div className="ml-auto flex items-center gap-2 text-xs opacity-80">
+              <span>Toca fora da imagem para fechar</span>
             </div>
           </div>
 
+          {/* navegação simples */}
           <button
-            onClick={() => setLightboxIndex(i => (i! - 1 + filtered.length) % filtered.length)}
+            onClick={(e) => { e.stopPropagation(); setLightboxIndex(i => (i! - 1 + filtered.length) % filtered.length); }}
             className="absolute left-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-white/15 hover:bg-white/25 rounded"
             aria-label="Anterior"
           >&larr;</button>
           <button
-            onClick={() => setLightboxIndex(i => (i! + 1) % filtered.length)}
+            onClick={(e) => { e.stopPropagation(); setLightboxIndex(i => (i! + 1) % filtered.length); }}
             className="absolute right-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-white/15 hover:bg-white/25 rounded"
             aria-label="Seguinte"
           >&rarr;</button>
@@ -477,7 +322,7 @@ export default function App() {
       )}
 
       <footer className="text-center text-xs text-neutral-500 py-8">
-        Clica numa imagem para ampliar. Pinça para zoom, arrasta para mover, duplo-clique para reset.
+        Clica numa imagem para ver em ecrã. Altura ajusta-se ao telemóvel.
       </footer>
     </div>
   );
