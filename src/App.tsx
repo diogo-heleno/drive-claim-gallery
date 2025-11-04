@@ -254,4 +254,103 @@ export default function App() {
       {/* LIGHTBOX */}
       {currentItem && (
         <div
-          className="fixed inset-0 z-5
+          className="fixed inset-0 z-50 bg-black/90 text-white"
+          onKeyDown={onKeyDown}
+          tabIndex={0}
+        >
+          <div className="absolute inset-0">
+            <div
+              className="w-full h-full cursor-grab active:cursor-grabbing overflow-hidden"
+              onWheel={onWheel}
+              onMouseDown={onMouseDown}
+              onMouseMove={onMouseMove}
+              onMouseUp={onMouseUp}
+              onMouseLeave={onMouseUp}
+              onDoubleClick={resetView}
+            >
+              <img
+                src={currentItem.image_url}
+                alt={currentItem.title || "Imagem"}
+                draggable={false}
+                className="pointer-events-none select-none absolute top-1/2 left-1/2 max-w-none"
+                style={{
+                  transform: `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px)) scale(${scale})`,
+                  transition: draggingRef.current ? "none" : "transform 80ms ease-out"
+                }}
+                onError={e => {
+                  const el = e.currentTarget as HTMLImageElement;
+                  const m = currentItem.image_url.match(/id=([^&]+)/);
+                  if (m && m[1]) el.src = `https://lh3.googleusercontent.com/d/${m[1]}=w2400`;
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="absolute top-3 left-3 right-3 flex items-center gap-2">
+            <div className="px-3 py-1 rounded bg-white/10 text-xs">
+              {currentItem.title || "Sem título"} {currentItem.owner ? `• ${currentItem.owner}` : ""}
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              <button onClick={resetView} className="px-3 py-2 rounded bg-white/15 hover:bg-white/25 text-sm">Reset</button>
+              <button onClick={closeLightbox} className="px-3 py-2 rounded bg-white hover:bg-white/90 text-black text-sm">Fechar (Esc)</button>
+            </div>
+          </div>
+
+          {/* Navegação */}
+          <button
+            onClick={() => setLightboxIndex(i => (i! - 1 + filtered.length) % filtered.length)}
+            className="absolute left-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-white/15 hover:bg-white/25 rounded"
+            aria-label="Anterior"
+          >&larr;</button>
+          <button
+            onClick={() => setLightboxIndex(i => (i! + 1) % filtered.length)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-white/15 hover:bg-white/25 rounded"
+            aria-label="Seguinte"
+          >&rarr;</button>
+        </div>
+      )}
+
+      {showImport && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-40">
+          <div className="bg-white w-full max-w-2xl rounded-2xl p-4 space-y-3">
+            <h2 className="text-lg font-semibold">Importar links de imagens</h2>
+            <p className="text-sm text-neutral-600">
+              Cole um link por linha. Links do Google Drive no formato <code>file/d/ID/view</code> são convertidos automaticamente.
+            </p>
+            <div className="flex gap-2 items-center">
+              <input
+                type="password"
+                placeholder="PIN de admin"
+                className="px-3 py-2 border rounded-xl text-sm w-40"
+                value={pin}
+                onChange={e => setPin(e.target.value)}
+              />
+              <span className="text-xs text-neutral-500">Definido via VITE_ADMIN_PIN</span>
+            </div>
+            <textarea
+              rows={10}
+              className="w-full px-3 py-2 border rounded-xl text-sm"
+              placeholder="https://drive.google.com/file/d/FILE_ID/view?usp=sharing"
+              value={importText}
+              onChange={e => setImportText(e.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <button className="px-3 py-2 border rounded-xl text-sm" onClick={() => setShowImport(false)}>Cancelar</button>
+              <button
+                className="px-3 py-2 border rounded-xl text-sm bg-neutral-900 text-white disabled:opacity-50"
+                onClick={handleImport}
+                disabled={importing}
+              >
+                {importing ? "A importar…" : "Importar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <footer className="text-center text-xs text-neutral-500 py-8">
+        Clica numa imagem para ampliar. Roda para zoom, arrasta para mover, duplo-clique para reset.
+      </footer>
+    </div>
+  );
+}
