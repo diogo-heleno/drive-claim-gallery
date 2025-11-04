@@ -48,15 +48,17 @@ export default function App() {
   const [imgW, setImgW] = useState(0);
   const [imgH, setImgH] = useState(0);
 
-  // Gestos
+  // Gestos/pointers
   const draggingRef = useRef(false);
   const lastPosRef = useRef<{x:number;y:number}>({x:0,y:0});
-  const touchModeRef = useRef<"none"|"pan"|"pinch">("none");
-  const pinchStartDistRef = useRef(1);
+
+  // Pointer Events para pinch
+  const pointersRef = useRef<Map<number, {x:number, y:number}>>(new Map());
   const pinchStartScaleRef = useRef(1);
-  const pinchStartCenterRef = useRef<{x:number;y:number}>({x:0,y:0});
   const pinchStartTxRef = useRef(0);
   const pinchStartTyRef = useRef(0);
+  const pinchStartCenterRef = useRef<{x:number;y:number}>({x:0,y:0});
+  const pinchStartDistRef = useRef<number | null>(null);
 
   // Bloquear scroll do fundo quando o lightbox está aberto
   useEffect(() => {
@@ -129,13 +131,13 @@ export default function App() {
   function openLightbox(idx: number) {
     setLightboxIndex(idx);
     setScale(1); setTx(0); setTy(0);
-    // as dimensões reais são lidas em onLoad do <img>
   }
   function closeLightbox() {
     setLightboxIndex(null);
     setScale(1); setTx(0); setTy(0);
-    touchModeRef.current = "none";
     draggingRef.current = false;
+    pointersRef.current.clear();
+    pinchStartDistRef.current = null;
   }
   function resetView() { setScale(1); setTx(0); setTy(0); }
 
@@ -145,7 +147,6 @@ export default function App() {
     const vh = window.innerHeight;
     const w = imgW * s;
     const h = imgH * s;
-    // overflow além da viewport (metade para cada lado por estarmos centrados)
     const overX = Math.max(0, (w - vw) / 2);
     const overY = Math.max(0, (h - vh) / 2);
     return {
@@ -173,59 +174,56 @@ export default function App() {
     const factor = e.deltaY < 0 ? 1.1 : 0.9;
     setScale(s => Math.min(6, Math.max(1, s * factor)));
   }
-  // Desktop: pan com rato quando scale>1
-  function onMouseDown(e: React.MouseEvent) {
-    draggingRef.current = true;
-    lastPosRef.current = { x: e.clientX, y: e.clientY };
-  }
-  function onMouseMove(e: React.MouseEvent) {
-    if (!draggingRef.current || scale <= 1) return;
-    const dx = e.clientX - lastPosRef.current.x;
-    const dy = e.clientY - lastPosRef.current.y;
-    lastPosRef.current = { x: e.clientX, y: e.clientY };
-    const r = clampPan(tx + dx, ty + dy, scale);
-    setTx(r.x); setTy(r.y);
-  }
-  function onMouseUp() { draggingRef.current = false; }
 
-  // Mobile: pinch + pan
-  function dist(a: Touch, b: Touch) {
-    const dx = a.clientX - b.clientX;
-    const dy = a.clientY - b.clientY;
-    return Math.hypot(dx, dy);
-  }
-  function center(a: Touch, b: Touch) {
-    return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
+  // ---------- Pointer Events (rato + toque) ----------
+  function getCenterAndDist() {
+    const pts = Array.from(pointersRef.current.values());
+    if (pts.length < 2) return { center: null as null | {x:number;y:number}, dist: 0 };
+    const [a, b] = pts;
+    const center = { x: (a.x + b.x)/2, y: (a.y + b.y)/2 };
+    const dx = a.x - b.x, dy = a.y - b.y;
+    return { center, dist: Math.hypot(dx, dy) };
   }
 
-  function onTouchStart(e: React.TouchEvent) {
-    if (e.touches.length === 2) {
-      touchModeRef.current = "pinch";
-      const a = e.touches[0], b = e.touches[1];
-      pinchStartDistRef.current = dist(a, b);
+  function onPointerDown(e: React.PointerEvent) {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointersRef.current.size === 2) {
+      const { center } = getCenterAndDist();
       pinchStartScaleRef.current = scale;
-      pinchStartCenterRef.current = center(a, b);
       pinchStartTxRef.current = tx;
       pinchStartTyRef.current = ty;
-    } else if (e.touches.length === 1) {
-      touchModeRef.current = "pan";
-      lastPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      pinchStartCenterRef.current = center || { x: e.clientX, y: e.clientY };
+      pinchStartDistRef.current = null; // define na primeira move
+    } else if (pointersRef.current.size === 1) {
+      lastPosRef.current = { x: e.clientX, y: e.clientY };
+      draggingRef.current = true;
     }
   }
 
-  function onTouchMove(e: React.TouchEvent) {
-    if (touchModeRef.current === "pinch" && e.touches.length === 2) {
-      e.preventDefault();
-      const a = e.touches[0], b = e.touches[1];
-      const d = dist(a, b);
-      const c = center(a, b);
+  function onPointerMove(e: React.PointerEvent) {
+    if (!pointersRef.current.has(e.pointerId)) return;
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-      let nextScale = (pinchStartScaleRef.current * d) / pinchStartDistRef.current;
+    const pts = Array.from(pointersRef.current.values());
+    if (pts.length >= 2) {
+      e.preventDefault();
+      const { center, dist } = getCenterAndDist();
+      if (!center || dist === 0) return;
+
+      // inicializar distância “0” na primeira move
+      if (pinchStartDistRef.current == null) {
+        pinchStartDistRef.current = dist;
+        return;
+      }
+
+      let nextScale = pinchStartScaleRef.current * (dist / (pinchStartDistRef.current || dist));
       nextScale = Math.min(6, Math.max(1, nextScale));
 
       // manter o centro do gesto estável
-      const dx = c.x - pinchStartCenterRef.current.x;
-      const dy = c.y - pinchStartCenterRef.current.y;
+      const dx = center.x - pinchStartCenterRef.current.x;
+      const dy = center.y - pinchStartCenterRef.current.y;
       const k = nextScale / pinchStartScaleRef.current;
 
       const nextTx = pinchStartTxRef.current * k + dx;
@@ -235,21 +233,27 @@ export default function App() {
       setScale(nextScale);
       setTx(clamped.x);
       setTy(clamped.y);
-    } else if (touchModeRef.current === "pan" && e.touches.length === 1 && scale > 1) {
+    } else if (draggingRef.current && scale > 1) {
       e.preventDefault();
-      const x = e.touches[0].clientX;
-      const y = e.touches[0].clientY;
-      const dx = x - lastPosRef.current.x;
-      const dy = y - lastPosRef.current.y;
-      lastPosRef.current = { x, y };
+      const dx = e.clientX - lastPosRef.current.x;
+      const dy = e.clientY - lastPosRef.current.y;
+      lastPosRef.current = { x: e.clientX, y: e.clientY };
       const r = clampPan(tx + dx, ty + dy, scale);
       setTx(r.x); setTy(r.y);
     }
   }
 
-  function onTouchEnd() {
-    touchModeRef.current = "none";
+  function onPointerUp(e: React.PointerEvent) {
+    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    pointersRef.current.delete(e.pointerId);
+    if (pointersRef.current.size < 2) {
+      pinchStartDistRef.current = null;
+    }
+    if (pointersRef.current.size === 0) {
+      draggingRef.current = false;
+    }
   }
+  // ---------- fim Pointer Events ----------
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Escape") closeLightbox();
@@ -377,16 +381,13 @@ export default function App() {
         >
           <div className="absolute inset-0">
             <div
-              className="w-full h-full cursor-grab active:cursor-grabbing overflow-hidden touch-none"
+              className="w-full h-full cursor-grab active:cursor-grabbing overflow-hidden"
+              style={{ touchAction: "none" }}  // essencial para pinch funcionar
               onWheel={onWheel}
-              onMouseDown={onMouseDown}
-              onMouseMove={onMouseMove}
-              onMouseUp={onMouseUp}
-              onMouseLeave={onMouseUp}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
               onDoubleClick={resetView}
-              onTouchStart={onTouchStart}
-              onTouchMove={onTouchMove}
-              onTouchEnd={onTouchEnd}
             >
               <img
                 ref={imgRef}
@@ -396,14 +397,13 @@ export default function App() {
                 className="pointer-events-none select-none absolute top-1/2 left-1/2 max-w-none"
                 style={{
                   transform: `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px)) scale(${scale})`,
-                  transition: draggingRef.current || touchModeRef.current !== "none" ? "none" : "transform 80ms ease-out"
+                  transition: (draggingRef.current || pointersRef.current.size > 0) ? "none" : "transform 80ms ease-out"
                 }}
                 onLoad={(e) => {
                   const el = e.currentTarget as HTMLImageElement;
                   setImgW(el.naturalWidth || el.width);
                   setImgH(el.naturalHeight || el.height);
-                  // garantir clamp inicial (útil em imagens pequenas)
-                  const r = clampPan(tx, ty, 1);
+                  const r = clampPan(0, 0, 1);
                   setTx(r.x); setTy(r.y);
                 }}
                 onError={e => {
