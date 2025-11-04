@@ -124,37 +124,62 @@ export default function App() {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
-        <div className="max-w-7xl mx-auto p-4 flex gap-3 items-center">
-          <h1 className="text-xl font-semibold">Arrecadação • Galeria</h1>
-          <div className="ml-auto flex gap-2">
-            <input
-              className="px-3 py-2 border rounded-xl text-sm w-64"
-              placeholder="Pesquisar título…"
-              value={q}
-              onChange={e => setQ(e.target.value)}
-            />
-            <select
-              className="px-3 py-2 border rounded-xl text-sm"
-              value={ownerFilter}
-              onChange={e => { setOwnerFilter(e.target.value); setPage(1); }}
-            >
-              <option value="todos">Todos</option>
-              <option value="__none__">Sem dono</option>
-              {OWNERS.map(o => <option key={o} value={o}>{o}</option>)}
-            </select>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={onlyUntitled} onChange={e => setOnlyUntitled(e.target.checked)} />
-              Só sem título
-            </label>
-            <button
-              onClick={() => setShowImport(true)}
-              className="px-3 py-2 border rounded-xl text-sm hover:bg-neutral-50"
-            >
-              Importar links
-            </button>
-          </div>
-        </div>
-      </header>
+  <div className="max-w-7xl mx-auto p-4">
+    {/* Título */}
+    <h1 className="text-xl font-semibold">Arrecadação – Galeria</h1>
+
+    {/* Controles (um por linha) */}
+    <div className="mt-3 space-y-3 max-w-xl">
+      {/* Pesquisar título */}
+      <label className="block">
+        <span className="block text-sm text-neutral-700 mb-1">Pesquisar título</span>
+        <input
+          className="w-full px-3 py-2 border rounded-xl text-sm"
+          placeholder="Ex.: cadeirão da sala"
+          value={q}
+          onChange={e => { setQ(e.target.value); setPage(1); }}
+        />
+      </label>
+
+      {/* Dono (inclui Sem dono) */}
+      <label className="block">
+        <span className="block text-sm text-neutral-700 mb-1">Dono</span>
+        <select
+          className="w-full px-3 py-2 border rounded-xl text-sm"
+          value={ownerFilter}
+          onChange={e => { setOwnerFilter(e.target.value); setPage(1); }}
+        >
+          <option value="todos">Todos</option>
+          <option value="__none__">Sem dono</option>
+          {OWNERS.map(o => (
+            <option key={o} value={o}>{o}</option>
+          ))}
+        </select>
+      </label>
+
+      {/* Só sem título */}
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={onlyUntitled}
+          onChange={e => { setOnlyUntitled(e.target.checked); setPage(1); }}
+        />
+        Só sem título
+      </label>
+
+      {/* Importar links (linha própria) */}
+      <div>
+        <button
+          onClick={() => setShowImport(true)}
+          className="px-3 py-2 border rounded-xl text-sm hover:bg-neutral-50"
+        >
+          Importar links
+        </button>
+      </div>
+    </div>
+  </div>
+</header>
+
 
       <main className="max-w-7xl mx-auto p-4">
         {loading ? (
