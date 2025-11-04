@@ -39,11 +39,14 @@ export default function App() {
   const [importText, setImportText] = useState("");
   const [importing, setImporting] = useState(false);
 
-  // Lightbox
+  // Lightbox + zoom/pan
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [scale, setScale] = useState(1);
   const [tx, setTx] = useState(0);
   const [ty, setTy] = useState(0);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const [imgW, setImgW] = useState(0);
+  const [imgH, setImgH] = useState(0);
 
   // Gestos
   const draggingRef = useRef(false);
@@ -54,6 +57,20 @@ export default function App() {
   const pinchStartCenterRef = useRef<{x:number;y:number}>({x:0,y:0});
   const pinchStartTxRef = useRef(0);
   const pinchStartTyRef = useRef(0);
+
+  // Bloquear scroll do fundo quando o lightbox está aberto
+  useEffect(() => {
+    if (lightboxIndex !== null) {
+      const prevOverflow = document.body.style.overflow;
+      const prevPos = document.body.style.position;
+      document.body.style.overflow = "hidden";
+      document.body.style.position = "fixed";
+      return () => {
+        document.body.style.overflow = prevOverflow;
+        document.body.style.position = prevPos;
+      };
+    }
+  }, [lightboxIndex]);
 
   useEffect(() => {
     (async () => {
@@ -108,10 +125,11 @@ export default function App() {
     setShowImport(false);
   }
 
-  // Lightbox helpers
+  // ------- Lightbox helpers -------
   function openLightbox(idx: number) {
     setLightboxIndex(idx);
     setScale(1); setTx(0); setTy(0);
+    // as dimensões reais são lidas em onLoad do <img>
   }
   function closeLightbox() {
     setLightboxIndex(null);
@@ -120,6 +138,34 @@ export default function App() {
     draggingRef.current = false;
   }
   function resetView() { setScale(1); setTx(0); setTy(0); }
+
+  // Clamping do pan para não “perder” a imagem
+  function clampPan(nx: number, ny: number, s: number) {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const w = imgW * s;
+    const h = imgH * s;
+    // overflow além da viewport (metade para cada lado por estarmos centrados)
+    const overX = Math.max(0, (w - vw) / 2);
+    const overY = Math.max(0, (h - vh) / 2);
+    return {
+      x: Math.max(-overX, Math.min(overX, nx)),
+      y: Math.max(-overY, Math.min(overY, ny)),
+    };
+  }
+
+  // Re-clamp quando muda o scale ou no resize
+  useEffect(() => {
+    const { x, y } = clampPan(tx, ty, scale);
+    if (x !== tx) setTx(x);
+    if (y !== ty) setTy(y);
+    function onResize() {
+      const r = clampPan(tx, ty, scale);
+      setTx(r.x); setTy(r.y);
+    }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [scale]); // eslint-disable-line
 
   // Desktop: roda para zoom
   function onWheel(e: React.WheelEvent) {
@@ -137,8 +183,8 @@ export default function App() {
     const dx = e.clientX - lastPosRef.current.x;
     const dy = e.clientY - lastPosRef.current.y;
     lastPosRef.current = { x: e.clientX, y: e.clientY };
-    setTx(v => v + dx);
-    setTy(v => v + dy);
+    const r = clampPan(tx + dx, ty + dy, scale);
+    setTx(r.x); setTy(r.y);
   }
   function onMouseUp() { draggingRef.current = false; }
 
@@ -173,23 +219,22 @@ export default function App() {
       const a = e.touches[0], b = e.touches[1];
       const d = dist(a, b);
       const c = center(a, b);
-      // novo scale
+
       let nextScale = (pinchStartScaleRef.current * d) / pinchStartDistRef.current;
       nextScale = Math.min(6, Math.max(1, nextScale));
 
-      // manter o centro de zoom estável (ajuste de translate)
-      // deslocação do centro desde o início do gesto
+      // manter o centro do gesto estável
       const dx = c.x - pinchStartCenterRef.current.x;
       const dy = c.y - pinchStartCenterRef.current.y;
-
-      // compensação de zoom em torno do centro inicial
       const k = nextScale / pinchStartScaleRef.current;
+
       const nextTx = pinchStartTxRef.current * k + dx;
       const nextTy = pinchStartTyRef.current * k + dy;
+      const clamped = clampPan(nextTx, nextTy, nextScale);
 
       setScale(nextScale);
-      setTx(nextTx);
-      setTy(nextTy);
+      setTx(clamped.x);
+      setTy(clamped.y);
     } else if (touchModeRef.current === "pan" && e.touches.length === 1 && scale > 1) {
       e.preventDefault();
       const x = e.touches[0].clientX;
@@ -197,21 +242,12 @@ export default function App() {
       const dx = x - lastPosRef.current.x;
       const dy = y - lastPosRef.current.y;
       lastPosRef.current = { x, y };
-      setTx(v => v + dx);
-      setTy(v => v + dy);
+      const r = clampPan(tx + dx, ty + dy, scale);
+      setTx(r.x); setTy(r.y);
     }
   }
 
   function onTouchEnd() {
-    if (touchModeRef.current === "pinch" && scale < 1.01) {
-      // regressa a neutro se ficou quase sem zoom
-      setScale(1); setTx(0); setTy(0);
-    }
-    if (typeof window !== "undefined" && (window as any).navigator?.vibrate) {
-      // opcional: pequeno feedback ao terminar pinch
-      // (ignorado por iOS Safari)
-      // (window as any).navigator.vibrate(0);
-    }
     touchModeRef.current = "none";
   }
 
@@ -279,7 +315,7 @@ export default function App() {
                         className="w-full h-full object-cover cursor-zoom-in select-none"
                         draggable={false}
                         referrerPolicy="no-referrer"
-                        onClick={() => openLightbox((page - 1) * PAGE_SIZE + idx)}
+                        onClick={() => setLightboxIndex((page - 1) * PAGE_SIZE + idx)}
                         onError={e => {
                           const el = e.currentTarget as HTMLImageElement;
                           const m = item.image_url.match(/id=([^&]+)/);
@@ -335,7 +371,7 @@ export default function App() {
       {/* LIGHTBOX */}
       {currentItem && (
         <div
-          className="fixed inset-0 z-50 bg-black/90 text-white"
+          className="fixed inset-0 z-50 bg-black/90 text-white overscroll-contain"
           onKeyDown={onKeyDown}
           tabIndex={0}
         >
@@ -353,6 +389,7 @@ export default function App() {
               onTouchEnd={onTouchEnd}
             >
               <img
+                ref={imgRef}
                 src={currentItem.image_url}
                 alt={currentItem.title || "Imagem"}
                 draggable={false}
@@ -360,6 +397,14 @@ export default function App() {
                 style={{
                   transform: `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px)) scale(${scale})`,
                   transition: draggingRef.current || touchModeRef.current !== "none" ? "none" : "transform 80ms ease-out"
+                }}
+                onLoad={(e) => {
+                  const el = e.currentTarget as HTMLImageElement;
+                  setImgW(el.naturalWidth || el.width);
+                  setImgH(el.naturalHeight || el.height);
+                  // garantir clamp inicial (útil em imagens pequenas)
+                  const r = clampPan(tx, ty, 1);
+                  setTx(r.x); setTy(r.y);
                 }}
                 onError={e => {
                   const el = e.currentTarget as HTMLImageElement;
