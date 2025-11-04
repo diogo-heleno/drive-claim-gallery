@@ -6,7 +6,7 @@ type Item = {
   image_url: string;
   title: string | null;
   owner: string | null;
-  also_want: string[];   // lista de interessados adicionais
+  also_want: string[];   // lista de interessados adicionais (nunca null)
   created_at: string;
   updated_at: string;
 };
@@ -70,19 +70,28 @@ export default function App() {
         .from("items")
         .select("*")
         .order("created_at", { ascending: false });
-      if (!error) setItems(data || []);
+
+      if (!error) {
+        setItems((data || []).map((d: any) => ({
+          ...d,
+          also_want: Array.isArray(d.also_want) ? d.also_want : [], // normalizar
+        })));
+      }
       setLoading(false);
     })();
 
     const channel = supabase
       .channel("realtime:items")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "items" }, (p: any) => {
-        setItems(prev => [p.new as Item, ...prev.filter(i => i.id !== p.new.id)]);
+        const row = { ...p.new, also_want: Array.isArray(p.new.also_want) ? p.new.also_want : [] } as Item;
+        setItems(prev => [row, ...prev.filter(i => i.id !== row.id)]);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "items" }, (p: any) => {
-        setItems(prev => prev.map(i => (i.id === p.new.id ? (p.new as Item) : i)));
+        const row = { ...p.new, also_want: Array.isArray(p.new.also_want) ? p.new.also_want : [] } as Item;
+        setItems(prev => prev.map(i => (i.id === row.id ? row : i)));
       })
       .subscribe();
+
     return () => { supabase.removeChannel(channel); };
   }, []);
 
@@ -235,10 +244,10 @@ export default function App() {
                         value={item.owner || "__none__"}
                         onChange={e => {
                           const newOwner = e.target.value === "__none__" ? null : e.target.value;
-                          // remove o novo dono da lista de interessados, se estiver
+                          // remove o novo dono da lista de interessados, se estiver, e nunca enviar null
                           let nextAlso = (item.also_want || []).filter(n => n !== newOwner);
                           nextAlso = sanitizeInterested(nextAlso);
-                          updateItem(item.id, { owner: newOwner, also_want: nextAlso.length ? nextAlso : null });
+                          updateItem(item.id, { owner: newOwner, also_want: nextAlso });
                         }}
                       >
                         <option value="__none__">Sem dono</option>
@@ -251,10 +260,10 @@ export default function App() {
 
                         {/* chips */}
                         <div className="flex flex-wrap gap-2">
-                          {(item.also_want || []).length === 0 ? (
+                          {item.also_want.length === 0 ? (
                             <span className="text-xs text-neutral-500">Sem interessados</span>
                           ) : (
-                            (item.also_want || []).map(name => (
+                            item.also_want.map(name => (
                               <span
                                 key={name}
                                 className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border"
@@ -263,8 +272,8 @@ export default function App() {
                                 <button
                                   className="text-neutral-500 hover:text-neutral-800"
                                   onClick={() => {
-                                    const next = sanitizeInterested((item.also_want || []).filter(n => n !== name));
-                                    updateItem(item.id, { also_want: next.length ? next : null });
+                                    const next = sanitizeInterested(item.also_want.filter(n => n !== name));
+                                    updateItem(item.id, { also_want: next }); // enviar [] se vazio
                                   }}
                                   title="Remover"
                                 >
@@ -284,7 +293,7 @@ export default function App() {
                               const sel = e.target.value;
                               if (!sel) return;
                               if (sel === (item.owner || "")) { e.currentTarget.value = ""; return; }
-                              const curr = item.also_want || [];
+                              const curr = item.also_want;
                               if (!curr.includes(sel)) {
                                 const next = sanitizeInterested([...curr, sel]);
                                 updateItem(item.id, { also_want: next });
@@ -294,7 +303,7 @@ export default function App() {
                           >
                             <option value="">Adicionar interessado…</option>
                             {OWNERS
-                              .filter(o => o !== (item.owner || "") && !(item.also_want || []).includes(o))
+                              .filter(o => o !== (item.owner || "") && !item.also_want.includes(o))
                               .map(o => <option key={o} value={o}>{o}</option>)
                             }
                           </select>
