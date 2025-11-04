@@ -6,6 +6,7 @@ type Item = {
   image_url: string;
   title: string | null;
   owner: string | null;
+  also_want: string[] | null;   // <— novo
   created_at: string;
   updated_at: string;
 };
