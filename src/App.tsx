@@ -27,7 +27,6 @@ function normalizeImageUrl(raw: string) {
 }
 
 function sanitizeInterested(list: string[]): string[] {
-  // mantém nomes válidos, únicos, na ordem de inserção
   const set = new Set(list.filter(n => OWNERS.includes(n)));
   return Array.from(set);
 }
@@ -48,6 +47,44 @@ export default function App() {
 
   // Lightbox simples (sem zoom)
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+
+  // Header auto-hide
+  const [hideHeader, setHideHeader] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+  const lastYRef = useRef(0);
+  const tickingRef = useRef(false);
+
+  useEffect(() => {
+    function onScroll() {
+      const y = window.scrollY || 0;
+      setScrolled(y > 4);
+
+      // não esconder enquanto o lightbox está aberto
+      if (lightboxIndex !== null) { setHideHeader(false); return; }
+
+      if (!tickingRef.current) {
+        tickingRef.current = true;
+        requestAnimationFrame(() => {
+          const goingDown = y > lastYRef.current + 4;
+          const goingUp = y < lastYRef.current - 4;
+
+          if (y < 32) {
+            setHideHeader(false);
+          } else if (goingDown) {
+            setHideHeader(true);
+          } else if (goingUp) {
+            setHideHeader(false);
+          }
+
+          lastYRef.current = y;
+          tickingRef.current = false;
+        });
+      }
+    }
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [lightboxIndex]);
 
   // Bloquear scroll do fundo quando o lightbox está aberto
   useEffect(() => {
@@ -142,7 +179,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
+      <header
+        className={[
+          "sticky top-0 z-10 backdrop-blur border-b bg-white/90",
+          "transition-transform duration-300 will-change-transform",
+          hideHeader ? "-translate-y-full" : "translate-y-0",
+          scrolled ? "shadow-sm" : "shadow-none",
+        ].join(" ")}
+      >
         <div className="max-w-7xl mx-auto p-4">
           {/* Título */}
           <h1 className="text-xl font-semibold">Arrecadação – Galeria</h1>
@@ -244,7 +288,6 @@ export default function App() {
                         value={item.owner || "__none__"}
                         onChange={e => {
                           const newOwner = e.target.value === "__none__" ? null : e.target.value;
-                          // remove o novo dono da lista de interessados, se estiver, e nunca enviar null
                           let nextAlso = (item.also_want || []).filter(n => n !== newOwner);
                           nextAlso = sanitizeInterested(nextAlso);
                           updateItem(item.id, { owner: newOwner, also_want: nextAlso });
@@ -273,7 +316,7 @@ export default function App() {
                                   className="text-neutral-500 hover:text-neutral-800"
                                   onClick={() => {
                                     const next = sanitizeInterested(item.also_want.filter(n => n !== name));
-                                    updateItem(item.id, { also_want: next }); // enviar [] se vazio
+                                    updateItem(item.id, { also_want: next });
                                   }}
                                   title="Remover"
                                 >
