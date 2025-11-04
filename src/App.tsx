@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 type Item = {
@@ -39,11 +39,19 @@ export default function App() {
   const [importText, setImportText] = useState("");
   const [importing, setImporting] = useState(false);
 
+  // Lightbox state
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [scale, setScale] = useState(1);
+  const [tx, setTx] = useState(0);
+  const [ty, setTy] = useState(0);
+  const draggingRef = useRef(false);
+  const lastPosRef = useRef<{x:number;y:number}>({x:0,y:0});
+
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const { data, error } = await supabase.from("items").select("*").order("created_at", { ascending: false });
-      if (!error && data) setItems(data);
+      const { data } = await supabase.from("items").select("*").order("created_at", { ascending: false });
+      setItems(data || []);
       setLoading(false);
     })();
 
@@ -92,6 +100,51 @@ export default function App() {
     setShowImport(false);
   }
 
+  // --- Lightbox helpers ---
+  function openLightbox(idx: number) {
+    setLightboxIndex(idx);
+    setScale(1); setTx(0); setTy(0);
+  }
+  function closeLightbox() {
+    setLightboxIndex(null);
+    setScale(1); setTx(0); setTy(0);
+  }
+  function onWheel(e: React.WheelEvent) {
+    e.preventDefault();
+    const delta = -e.deltaY; // roda para cima aumenta
+    const factor = delta > 0 ? 1.1 : 0.9;
+    setScale(s => {
+      const next = Math.min(6, Math.max(1, s * factor));
+      return next;
+    });
+  }
+  function onMouseDown(e: React.MouseEvent) {
+    draggingRef.current = true;
+    lastPosRef.current = { x: e.clientX, y: e.clientY };
+  }
+  function onMouseMove(e: React.MouseEvent) {
+    if (!draggingRef.current || scale <= 1) return;
+    const dx = e.clientX - lastPosRef.current.x;
+    const dy = e.clientY - lastPosRef.current.y;
+    lastPosRef.current = { x: e.clientX, y: e.clientY };
+    setTx(v => v + dx);
+    setTy(v => v + dy);
+  }
+  function onMouseUp() {
+    draggingRef.current = false;
+  }
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Escape") closeLightbox();
+    if (e.key === "+" || e.key === "=") setScale(s => Math.min(6, s * 1.1));
+    if (e.key === "-" || e.key === "_") setScale(s => Math.max(1, s * 0.9));
+    if (e.key === "0") { setScale(1); setTx(0); setTy(0); }
+    if (e.key === "ArrowRight" && lightboxIndex !== null) setLightboxIndex(i => (i! + 1) % filtered.length);
+    if (e.key === "ArrowLeft" && lightboxIndex !== null) setLightboxIndex(i => (i! - 1 + filtered.length) % filtered.length);
+  }
+  function resetView() { setScale(1); setTx(0); setTy(0); }
+
+  const currentItem = lightboxIndex !== null ? filtered[lightboxIndex] : null;
+
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
@@ -136,14 +189,16 @@ export default function App() {
               <div className="py-24 text-center text-neutral-500">Sem resultados.</div>
             ) : (
               <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
-                {pageItems.map(item => (
+                {pageItems.map((item, idx) => (
                   <div key={item.id} className="bg-white rounded-2xl shadow-card overflow-hidden border">
                     <div className="aspect-[4/3] bg-neutral-100 overflow-hidden">
                       <img
                         src={item.image_url}
                         alt={item.title || "Imagem"}
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover cursor-zoom-in select-none"
+                        draggable={false}
                         referrerPolicy="no-referrer"
+                        onClick={() => openLightbox((page - 1) * PAGE_SIZE + idx)}
                         onError={e => {
                           const el = e.currentTarget as HTMLImageElement;
                           const m = item.image_url.match(/id=([^&]+)/);
@@ -196,47 +251,7 @@ export default function App() {
         )}
       </main>
 
-      {showImport && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-2xl rounded-2xl p-4 space-y-3">
-            <h2 className="text-lg font-semibold">Importar links de imagens</h2>
-            <p className="text-sm text-neutral-600">
-              Cole um link por linha. Links do Google Drive no formato <code>file/d/ID/view</code> são convertidos automaticamente.
-            </p>
-            <div className="flex gap-2 items-center">
-              <input
-                type="password"
-                placeholder="PIN de admin"
-                className="px-3 py-2 border rounded-xl text-sm w-40"
-                value={pin}
-                onChange={e => setPin(e.target.value)}
-              />
-              <span className="text-xs text-neutral-500">Definido via VITE_ADMIN_PIN</span>
-            </div>
-            <textarea
-              rows={10}
-              className="w-full px-3 py-2 border rounded-xl text-sm"
-              placeholder="https://drive.google.com/file/d/FILE_ID/view?usp=sharing"
-              value={importText}
-              onChange={e => setImportText(e.target.value)}
-            />
-            <div className="flex justify-end gap-2">
-              <button className="px-3 py-2 border rounded-xl text-sm" onClick={() => setShowImport(false)}>Cancelar</button>
-              <button
-                className="px-3 py-2 border rounded-xl text-sm bg-neutral-900 text-white disabled:opacity-50"
-                onClick={handleImport}
-                disabled={importing}
-              >
-                {importing ? "A importar…" : "Importar"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <footer className="text-center text-xs text-neutral-500 py-8">
-        Partilha o link com a família. Editem títulos e dono em conjunto.
-      </footer>
-    </div>
-  );
-}
+      {/* LIGHTBOX */}
+      {currentItem && (
+        <div
+          className="fixed inset-0 z-5
