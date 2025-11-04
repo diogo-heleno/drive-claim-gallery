@@ -6,7 +6,7 @@ type Item = {
   image_url: string;
   title: string | null;
   owner: string | null;
-  also_want: string[] | null;   // lista de interessados adicionais
+  also_want: string[];   // lista de interessados adicionais
   created_at: string;
   updated_at: string;
 };
