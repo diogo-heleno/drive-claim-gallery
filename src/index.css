@@ -8,3 +8,4 @@ input, select, button, textarea { outline: none; }
 
 img { -webkit-user-drag: none; user-select: none; }
 
+.overscroll-contain { overscroll-behavior: contain; }
