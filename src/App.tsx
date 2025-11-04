@@ -39,13 +39,21 @@ export default function App() {
   const [importText, setImportText] = useState("");
   const [importing, setImporting] = useState(false);
 
-  // Lightbox state
+  // Lightbox
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [scale, setScale] = useState(1);
   const [tx, setTx] = useState(0);
   const [ty, setTy] = useState(0);
+
+  // Gestos
   const draggingRef = useRef(false);
   const lastPosRef = useRef<{x:number;y:number}>({x:0,y:0});
+  const touchModeRef = useRef<"none"|"pan"|"pinch">("none");
+  const pinchStartDistRef = useRef(1);
+  const pinchStartScaleRef = useRef(1);
+  const pinchStartCenterRef = useRef<{x:number;y:number}>({x:0,y:0});
+  const pinchStartTxRef = useRef(0);
+  const pinchStartTyRef = useRef(0);
 
   useEffect(() => {
     (async () => {
@@ -100,7 +108,7 @@ export default function App() {
     setShowImport(false);
   }
 
-  // --- Lightbox helpers ---
+  // Lightbox helpers
   function openLightbox(idx: number) {
     setLightboxIndex(idx);
     setScale(1); setTx(0); setTy(0);
@@ -108,16 +116,18 @@ export default function App() {
   function closeLightbox() {
     setLightboxIndex(null);
     setScale(1); setTx(0); setTy(0);
+    touchModeRef.current = "none";
+    draggingRef.current = false;
   }
+  function resetView() { setScale(1); setTx(0); setTy(0); }
+
+  // Desktop: roda para zoom
   function onWheel(e: React.WheelEvent) {
     e.preventDefault();
-    const delta = -e.deltaY; // roda para cima aumenta
-    const factor = delta > 0 ? 1.1 : 0.9;
-    setScale(s => {
-      const next = Math.min(6, Math.max(1, s * factor));
-      return next;
-    });
+    const factor = e.deltaY < 0 ? 1.1 : 0.9;
+    setScale(s => Math.min(6, Math.max(1, s * factor)));
   }
+  // Desktop: pan com rato quando scale>1
   function onMouseDown(e: React.MouseEvent) {
     draggingRef.current = true;
     lastPosRef.current = { x: e.clientX, y: e.clientY };
@@ -130,9 +140,81 @@ export default function App() {
     setTx(v => v + dx);
     setTy(v => v + dy);
   }
-  function onMouseUp() {
-    draggingRef.current = false;
+  function onMouseUp() { draggingRef.current = false; }
+
+  // Mobile: pinch + pan
+  function dist(a: Touch, b: Touch) {
+    const dx = a.clientX - b.clientX;
+    const dy = a.clientY - b.clientY;
+    return Math.hypot(dx, dy);
   }
+  function center(a: Touch, b: Touch) {
+    return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
+  }
+
+  function onTouchStart(e: React.TouchEvent) {
+    if (e.touches.length === 2) {
+      touchModeRef.current = "pinch";
+      const a = e.touches[0], b = e.touches[1];
+      pinchStartDistRef.current = dist(a, b);
+      pinchStartScaleRef.current = scale;
+      pinchStartCenterRef.current = center(a, b);
+      pinchStartTxRef.current = tx;
+      pinchStartTyRef.current = ty;
+    } else if (e.touches.length === 1) {
+      touchModeRef.current = "pan";
+      lastPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+  }
+
+  function onTouchMove(e: React.TouchEvent) {
+    if (touchModeRef.current === "pinch" && e.touches.length === 2) {
+      e.preventDefault();
+      const a = e.touches[0], b = e.touches[1];
+      const d = dist(a, b);
+      const c = center(a, b);
+      // novo scale
+      let nextScale = (pinchStartScaleRef.current * d) / pinchStartDistRef.current;
+      nextScale = Math.min(6, Math.max(1, nextScale));
+
+      // manter o centro de zoom estável (ajuste de translate)
+      // deslocação do centro desde o início do gesto
+      const dx = c.x - pinchStartCenterRef.current.x;
+      const dy = c.y - pinchStartCenterRef.current.y;
+
+      // compensação de zoom em torno do centro inicial
+      const k = nextScale / pinchStartScaleRef.current;
+      const nextTx = pinchStartTxRef.current * k + dx;
+      const nextTy = pinchStartTyRef.current * k + dy;
+
+      setScale(nextScale);
+      setTx(nextTx);
+      setTy(nextTy);
+    } else if (touchModeRef.current === "pan" && e.touches.length === 1 && scale > 1) {
+      e.preventDefault();
+      const x = e.touches[0].clientX;
+      const y = e.touches[0].clientY;
+      const dx = x - lastPosRef.current.x;
+      const dy = y - lastPosRef.current.y;
+      lastPosRef.current = { x, y };
+      setTx(v => v + dx);
+      setTy(v => v + dy);
+    }
+  }
+
+  function onTouchEnd() {
+    if (touchModeRef.current === "pinch" && scale < 1.01) {
+      // regressa a neutro se ficou quase sem zoom
+      setScale(1); setTx(0); setTy(0);
+    }
+    if (typeof window !== "undefined" && (window as any).navigator?.vibrate) {
+      // opcional: pequeno feedback ao terminar pinch
+      // (ignorado por iOS Safari)
+      // (window as any).navigator.vibrate(0);
+    }
+    touchModeRef.current = "none";
+  }
+
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Escape") closeLightbox();
     if (e.key === "+" || e.key === "=") setScale(s => Math.min(6, s * 1.1));
@@ -141,7 +223,6 @@ export default function App() {
     if (e.key === "ArrowRight" && lightboxIndex !== null) setLightboxIndex(i => (i! + 1) % filtered.length);
     if (e.key === "ArrowLeft" && lightboxIndex !== null) setLightboxIndex(i => (i! - 1 + filtered.length) % filtered.length);
   }
-  function resetView() { setScale(1); setTx(0); setTy(0); }
 
   const currentItem = lightboxIndex !== null ? filtered[lightboxIndex] : null;
 
@@ -260,13 +341,16 @@ export default function App() {
         >
           <div className="absolute inset-0">
             <div
-              className="w-full h-full cursor-grab active:cursor-grabbing overflow-hidden"
+              className="w-full h-full cursor-grab active:cursor-grabbing overflow-hidden touch-none"
               onWheel={onWheel}
               onMouseDown={onMouseDown}
               onMouseMove={onMouseMove}
               onMouseUp={onMouseUp}
               onMouseLeave={onMouseUp}
               onDoubleClick={resetView}
+              onTouchStart={onTouchStart}
+              onTouchMove={onTouchMove}
+              onTouchEnd={onTouchEnd}
             >
               <img
                 src={currentItem.image_url}
@@ -275,7 +359,7 @@ export default function App() {
                 className="pointer-events-none select-none absolute top-1/2 left-1/2 max-w-none"
                 style={{
                   transform: `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px)) scale(${scale})`,
-                  transition: draggingRef.current ? "none" : "transform 80ms ease-out"
+                  transition: draggingRef.current || touchModeRef.current !== "none" ? "none" : "transform 80ms ease-out"
                 }}
                 onError={e => {
                   const el = e.currentTarget as HTMLImageElement;
@@ -296,7 +380,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Navegação */}
           <button
             onClick={() => setLightboxIndex(i => (i! - 1 + filtered.length) % filtered.length)}
             className="absolute left-2 top-1/2 -translate-y-1/2 px-3 py-2 bg-white/15 hover:bg-white/25 rounded"
@@ -349,7 +432,7 @@ export default function App() {
       )}
 
       <footer className="text-center text-xs text-neutral-500 py-8">
-        Clica numa imagem para ampliar. Roda para zoom, arrasta para mover, duplo-clique para reset.
+        Clica numa imagem para ampliar. Pinça para zoom, arrasta para mover, duplo-clique para reset.
       </footer>
     </div>
   );
