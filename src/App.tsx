@@ -6,7 +6,7 @@ type Item = {
   image_url: string;
   title: string | null;
   owner: string | null;
-  also_want: string[] | null;   // <— novo
+  also_want: string[] | null;   // lista de interessados adicionais
   created_at: string;
   updated_at: string;
 };
@@ -24,6 +24,12 @@ function normalizeImageUrl(raw: string) {
   const m = url.match(/https?:\/\/drive\.google\.com\/file\/d\/([^/]+)/);
   if (m && m[1]) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
   return url;
+}
+
+function sanitizeInterested(list: string[]): string[] {
+  // mantém nomes válidos, únicos, na ordem de inserção
+  const set = new Set(list.filter(n => OWNERS.includes(n)));
+  return Array.from(set);
 }
 
 export default function App() {
@@ -60,8 +66,11 @@ export default function App() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const { data } = await supabase.from("items").select("*").order("created_at", { ascending: false });
-      setItems(data || []);
+      const { data, error } = await supabase
+        .from("items")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (!error) setItems(data || []);
       setLoading(false);
     })();
 
@@ -125,62 +134,61 @@ export default function App() {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
-  <div className="max-w-7xl mx-auto p-4">
-    {/* Título */}
-    <h1 className="text-xl font-semibold">Arrecadação – Galeria</h1>
+        <div className="max-w-7xl mx-auto p-4">
+          {/* Título */}
+          <h1 className="text-xl font-semibold">Arrecadação – Galeria</h1>
 
-    {/* Controles (um por linha) */}
-    <div className="mt-3 space-y-3 max-w-xl">
-      {/* Pesquisar título */}
-      <label className="block">
-        <span className="block text-sm text-neutral-700 mb-1">Pesquisar título</span>
-        <input
-          className="w-full px-3 py-2 border rounded-xl text-sm"
-          placeholder="Ex.: cadeirão da sala"
-          value={q}
-          onChange={e => { setQ(e.target.value); setPage(1); }}
-        />
-      </label>
+          {/* Controles (um por linha) */}
+          <div className="mt-3 space-y-3 max-w-xl">
+            {/* Pesquisar título */}
+            <label className="block">
+              <span className="block text-sm text-neutral-700 mb-1">Pesquisar título</span>
+              <input
+                className="w-full px-3 py-2 border rounded-xl text-sm"
+                placeholder="Ex.: cadeirão da sala"
+                value={q}
+                onChange={e => { setQ(e.target.value); setPage(1); }}
+              />
+            </label>
 
-      {/* Dono (inclui Sem dono) */}
-      <label className="block">
-        <span className="block text-sm text-neutral-700 mb-1">Dono</span>
-        <select
-          className="w-full px-3 py-2 border rounded-xl text-sm"
-          value={ownerFilter}
-          onChange={e => { setOwnerFilter(e.target.value); setPage(1); }}
-        >
-          <option value="todos">Todos</option>
-          <option value="__none__">Sem dono</option>
-          {OWNERS.map(o => (
-            <option key={o} value={o}>{o}</option>
-          ))}
-        </select>
-      </label>
+            {/* Dono (inclui Sem dono) */}
+            <label className="block">
+              <span className="block text-sm text-neutral-700 mb-1">Dono</span>
+              <select
+                className="w-full px-3 py-2 border rounded-xl text-sm"
+                value={ownerFilter}
+                onChange={e => { setOwnerFilter(e.target.value); setPage(1); }}
+              >
+                <option value="todos">Todos</option>
+                <option value="__none__">Sem dono</option>
+                {OWNERS.map(o => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            </label>
 
-      {/* Só sem título */}
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={onlyUntitled}
-          onChange={e => { setOnlyUntitled(e.target.checked); setPage(1); }}
-        />
-        Só sem título
-      </label>
+            {/* Só sem título */}
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={onlyUntitled}
+                onChange={e => { setOnlyUntitled(e.target.checked); setPage(1); }}
+              />
+              Só sem título
+            </label>
 
-      {/* Importar links (linha própria) */}
-      <div>
-        <button
-          onClick={() => setShowImport(true)}
-          className="px-3 py-2 border rounded-xl text-sm hover:bg-neutral-50"
-        >
-          Importar links
-        </button>
-      </div>
-    </div>
-  </div>
-</header>
-
+            {/* Importar links (linha própria) */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowImport(true)}
+                className="px-3 py-2 border rounded-xl text-sm hover:bg-neutral-50"
+              >
+                Importar links
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
 
       <main className="max-w-7xl mx-auto p-4">
         {loading ? (
@@ -208,7 +216,9 @@ export default function App() {
                         }}
                       />
                     </div>
-                    <div className="p-3 space-y-2">
+
+                    <div className="p-3 space-y-3">
+                      {/* Título */}
                       <input
                         defaultValue={item.title || ""}
                         placeholder="Título (ex.: cadeirão da sala)"
@@ -218,14 +228,80 @@ export default function App() {
                           if (val !== (item.title || "")) updateItem(item.id, { title: val || null });
                         }}
                       />
+
+                      {/* Dono */}
                       <select
                         className="w-full px-3 py-2 border rounded-xl text-sm"
                         value={item.owner || "__none__"}
-                        onChange={e => updateItem(item.id, { owner: e.target.value === "__none__" ? null : e.target.value })}
+                        onChange={e => {
+                          const newOwner = e.target.value === "__none__" ? null : e.target.value;
+                          // remove o novo dono da lista de interessados, se estiver
+                          let nextAlso = (item.also_want || []).filter(n => n !== newOwner);
+                          nextAlso = sanitizeInterested(nextAlso);
+                          updateItem(item.id, { owner: newOwner, also_want: nextAlso.length ? nextAlso : null });
+                        }}
                       >
                         <option value="__none__">Sem dono</option>
                         {OWNERS.map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
+
+                      {/* Interessados (eu também quero) */}
+                      <div className="space-y-2">
+                        <div className="text-sm text-neutral-700">Interessados</div>
+
+                        {/* chips */}
+                        <div className="flex flex-wrap gap-2">
+                          {(item.also_want || []).length === 0 ? (
+                            <span className="text-xs text-neutral-500">Sem interessados</span>
+                          ) : (
+                            (item.also_want || []).map(name => (
+                              <span
+                                key={name}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs border"
+                              >
+                                {name}
+                                <button
+                                  className="text-neutral-500 hover:text-neutral-800"
+                                  onClick={() => {
+                                    const next = sanitizeInterested((item.also_want || []).filter(n => n !== name));
+                                    updateItem(item.id, { also_want: next.length ? next : null });
+                                  }}
+                                  title="Remover"
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))
+                          )}
+                        </div>
+
+                        {/* seletor para adicionar interessado */}
+                        <div className="flex gap-2">
+                          <select
+                            className="px-3 py-2 border rounded-xl text-sm w-full"
+                            value=""
+                            onChange={e => {
+                              const sel = e.target.value;
+                              if (!sel) return;
+                              if (sel === (item.owner || "")) { e.currentTarget.value = ""; return; }
+                              const curr = item.also_want || [];
+                              if (!curr.includes(sel)) {
+                                const next = sanitizeInterested([...curr, sel]);
+                                updateItem(item.id, { also_want: next });
+                              }
+                              e.currentTarget.value = "";
+                            }}
+                          >
+                            <option value="">Adicionar interessado…</option>
+                            {OWNERS
+                              .filter(o => o !== (item.owner || "") && !(item.also_want || []).includes(o))
+                              .map(o => <option key={o} value={o}>{o}</option>)
+                            }
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Metadados */}
                       <div className="text-xs text-neutral-500 flex justify-between">
                         <span>{item.owner || "Sem dono"}</span>
                         <span>{new Date(item.updated_at).toLocaleDateString()}</span>
